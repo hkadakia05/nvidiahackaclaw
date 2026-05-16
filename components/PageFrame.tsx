@@ -38,7 +38,7 @@ export default function PageFrame({
           <div>
             <h1 className="text-sm font-semibold tracking-tight">AgentControl</h1>
             <p className="text-xs text-slate-500">
-              Enterprise AI agent command center
+              Command Center for Autonomous Agents
             </p>
           </div>
 
