@@ -12,6 +12,7 @@ export default function ActivityPage() {
     isRunning,
     runAgentControl,
   } = useBackendRunStream();
+  // exported from useBackendRunStream
 
   return (
     <PageFrame
@@ -58,13 +59,13 @@ export default function ActivityPage() {
               <span className={`text-xs font-medium ${levelClass(event.level)}`}>
                 {levelLabel(event.level)}
               </span>
-
+              {/* severity level, level label turns in readable level */}
               <div>
                 <p className="text-slate-900">{event.message}</p>
-
+              {/* shows the message */}
                 <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[11px] text-slate-500">
                   <span>{event.type}</span>
-
+                {/* the type, gpu/policy/cache.hit, sandbox etc */}
                   {event.metadata &&
                     Object.entries(event.metadata).map(([key, value]) => (
                       <span key={key}>

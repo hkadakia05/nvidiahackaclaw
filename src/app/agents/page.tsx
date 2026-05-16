@@ -24,12 +24,14 @@ export default function AgentsPage() {
     <PageFrame
       connectionStatus={connectionStatus}
       isRunning={isRunning}
-      onRunAgentControl={runAgentControl}
+      onRunAgentControl={runAgentControl}  
+      // starts the backend
     >
       <h1 className="text-2xl font-semibold tracking-tight">Agents</h1>
       <p className="mt-1 text-sm text-slate-600">
         Monitor agent status, GPU usage, cost, workflow, and current action.
-      </p>
+      </p> 
+      {/* if no backend events: */}
       {!hasBackendEvents && (
         <p className="mt-4 text-xs text-slate-500">
           No backend agent telemetry yet. Click Run AgentControl to start a
@@ -50,6 +52,7 @@ export default function AgentsPage() {
         </thead>
 
         <tbody className="divide-y divide-slate-200">
+          {/* This checks whether there are zero agents. */}
           {agents.length === 0 ? (
             <tr>
               <td colSpan={6} className="py-3 text-slate-500">
@@ -85,5 +88,6 @@ export default function AgentsPage() {
         </tbody>
       </table>
     </PageFrame>
+    // agents are being pulled from backend via {agent} which uses {deriveAgentsFromEvents} which uses {events} from backend
   );
 }
