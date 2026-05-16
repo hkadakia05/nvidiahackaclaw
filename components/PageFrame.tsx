@@ -31,12 +31,19 @@ export default function PageFrame({
 }: PageFrameProps) {
   const pathname = usePathname();
 
-  return (
+ return (
     <main className="min-h-screen bg-[#f7f7f5] text-slate-950">
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-[#fbfbfa]/95 backdrop-blur">
         <div className="flex h-14 items-center justify-between px-6">
           <div>
-            <h1 className="text-sm font-semibold tracking-tight">AgentControl</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+            <img
+              src="/favicon.jpg"
+              alt="Agent Control favicon"
+              className="h-7 w-7 rounded-md object-contain"
+            />
+            <span className="animated-gradient-text">Agent Control</span>
+          </h1>
             <p className="text-xs text-slate-500">
               Command Center for Autonomous Agents
             </p>
