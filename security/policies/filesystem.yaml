@@ -1,0 +1,8 @@
+read_only:
+  - /etc/**
+  - /usr/**
+
+blocked_paths:
+  - .env
+  - secrets.txt
+  - ~/.ssh/id_rsa

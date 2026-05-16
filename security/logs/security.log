@@ -1,0 +1,4 @@
+[2026-05-15 23:07:29.453523] BLOCKED cmd: cat .env
+[2026-05-15 23:07:29.453661] BLOCKED cmd: rm -rf /
+[2026-05-15 23:10:53.871410] BLOCKED cmd: cat .env
+[2026-05-15 23:10:53.871699] BLOCKED cmd: rm -rf /
