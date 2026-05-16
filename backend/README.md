@@ -2,7 +2,7 @@
 
 Beginner-friendly FastAPI backend with WebSockets, SQLite, SQLAlchemy, and an optional Redis cache.
 
-## Setup on Windows PowerShell
+## Local Setup on Windows PowerShell
 
 Run these commands from the `backend` folder:
 
@@ -17,6 +17,33 @@ The API will run at:
 
 ```text
 http://127.0.0.1:8000
+```
+
+## Docker Compose Setup
+
+Run these commands from the repo root:
+
+```powershell
+docker compose up --build
+```
+
+The Compose setup starts two services:
+
+```text
+backend - FastAPI app running with uvicorn
+redis   - official Redis image used as an optional cache
+```
+
+The API will run at:
+
+```text
+http://127.0.0.1:8000
+```
+
+To stop the services:
+
+```powershell
+docker compose down
 ```
 
 ## Health Check
@@ -74,10 +101,16 @@ The backend creates a unique `run_id`, stores the run in SQLite, and streams tim
 
 Redis is optional. If Redis is not running, the app still works.
 
-To run Redis locally with Docker:
+For local venv development, you can run Redis separately with Docker:
 
 ```powershell
 docker run -d --name redis -p 6379:6379 redis
+```
+
+For Docker Compose, Redis is already included and the backend uses:
+
+```text
+REDIS_URL=redis://redis:6379/0
 ```
 
 When Redis is running, the backend hashes the task string and caches a fake decision. If the same task is sent again, the WebSocket stream includes a `cached_decision_used` event.
@@ -86,6 +119,7 @@ When Redis is running, the backend hashes the task string and caches a fake deci
 
 ```text
 backend/
+  Dockerfile
   app/
     main.py
     db.py
@@ -100,4 +134,4 @@ backend/
 
 ## Notes
 
-This project intentionally does not include authentication, real AI model calls, NVIDIA Brev, Docker Compose, or Dockerized app setup yet.
+This project intentionally does not include authentication, real AI model calls, or NVIDIA Brev.
