@@ -36,12 +36,13 @@ export default function ActivityPage() {
           No backend events yet. Click Run AgentControl to start a
           control-plane run.
         </p>
-      )}
+      )}  
+    {/*if hasBackendEvents not triggered message: no backend ....*/}
 
       <div className="mt-6 divide-y divide-slate-200 border-y border-slate-200 text-sm">
         {events.length === 0 ? (
-          <p className="py-3 text-slate-500">Waiting for backend event stream.</p>
-        ) : (
+          <p className="py-3 text-slate-500">Waiting for backend event stream.</p>  
+        ) : (   
           events
             .slice()
             .reverse()
