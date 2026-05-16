@@ -1,5 +1,5 @@
 import yaml
-#Dockerfile
+#Dockerfile needs
 with open("../policies/shell.yaml", "r") as f:
     shell_policy = yaml.safe_load(f)
 
