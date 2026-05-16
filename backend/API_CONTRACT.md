@@ -59,10 +59,22 @@ The server streams events live and also saves them in SQLite:
 ```json
 {
   "run_id": "9a55db5c-c8ac-4be7-b37d-8323a553c732",
-  "type": "security_check",
+  "type": "policy_evaluated",
   "source": "security",
   "level": "info",
-  "message": "Checking action against security policy",
+  "message": "Policy decision: deny risk=high reason=Command is blocked by shell policy: cat .env",
+  "action_type": "shell",
+  "tool_name": "shell",
+  "decision": "deny",
+  "risk_level": "high",
+  "policy_triggered": "shell_blocklist",
+  "reason": "Command is blocked by shell policy: cat .env",
+  "metadata": {
+    "source": "security",
+    "sandbox_used": false,
+    "resource_limits_checked": false,
+    "audit_written": false
+  },
   "timestamp": "2026-05-15T12:00:00.000000"
 }
 ```
@@ -75,10 +87,19 @@ agent_planning
 model_reasoning
 cached_decision_used
 security_check
+policy_evaluated
+resource_check
 tool_proposal
+sandbox_started
+sandbox_completed
+audit_written
 gpu_metric
 action_allowed
 action_blocked
+approval_required
+sandbox_violation
+resource_limit_hit
+security_warning
 final_answer
 run_complete
 run_failed
@@ -137,6 +158,69 @@ Today, `run_agent(task)` is a fake async generator that yields AI-shaped events
 such as `agent_planning`, `model_reasoning`, `tool_proposal`, and `final_answer`.
 It does not add `run_id` or `timestamp`; `run_manager.py` handles that when it
 saves events to SQLite and streams them to the WebSocket client.
+
+## Security Control Plane
+
+The backend treats the repo-level `/security` folder as protected
+infrastructure. It does not rewrite or restructure that module. Instead,
+`backend/app/security/` contains backend-side adapters that read the existing
+policy files and adapt agent actions into a standard decision shape:
+
+```json
+{
+  "decision": "allow",
+  "risk_level": "low",
+  "policy_triggered": null,
+  "reason": "Safe operation",
+  "metadata": {
+    "source": "security",
+    "sandbox_used": false,
+    "resource_limits_checked": false,
+    "audit_written": false
+  }
+}
+```
+
+Possible decisions:
+
+```text
+allow
+deny
+requires_approval
+```
+
+When the agent proposes a tool action, the backend evaluates policy first,
+runs the sandbox wrapper only when allowed, writes an audit record to
+`security/logs/audit.log`, and streams security timeline events to the
+frontend.
+
+Docker Compose mounts `./security` into the backend container at `/security`
+and sets `SECURITY_ROOT=/security`. Local venv runs use the repo-level
+`security` folder by default.
+
+Backend security services:
+
+```text
+backend/app/security/policy_service.py   - shell/filesystem/network/risk policies
+backend/app/security/resource_service.py - reports resource-limit availability
+backend/app/security/sandbox_service.py  - sandbox validation wrapper
+backend/app/security/audit_service.py    - structured audit and compatibility logs
+backend/app/security/approval_service.py - approval-required metadata
+backend/app/security/security_service.py - central facade used by run_manager
+```
+
+Example blocked action:
+
+```json
+{
+  "action_type": "shell",
+  "command": "cat .env",
+  "description": "Fake shell tool action proposed by the agent adapter"
+}
+```
+
+That action is denied by `security/policies/shell.yaml` and produces events
+such as `policy_evaluated`, `action_blocked`, and `sandbox_violation`.
 
 ## SQLite Schema Changes
 
