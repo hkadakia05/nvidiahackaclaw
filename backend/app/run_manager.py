@@ -6,31 +6,25 @@ from fastapi import WebSocket
 from sqlalchemy.orm import Session
 
 from app import models
+from app.agent_adapter import run_agent
 from app.redis_client import get_cached_decision, set_cached_decision
 
 
-# These are fake timeline events for the hackathon demo.
-# Later, each item could map to a real AI agent step.
-FAKE_TIMELINE = [
-    ("run_started", "Run started"),
-    ("agent_planning", "Agent is planning the task"),
-    ("security_check", "Checking action against security policy"),
-    ("tool_selected", "Tool selected"),
-    ("gpu_metric", "Estimated GPU cost calculated"),
-    ("action_allowed", "Action allowed"),
-    ("run_complete", "Run completed"),
-]
-
-
+# run_manager orchestrates a run from start to finish. It creates the run,
+# calls the AI adapter, saves every event to SQLite, and streams events through
+# the WebSocket.
 EVENT_METADATA = {
     "run_started": {"source": "backend", "level": "info"},
     "agent_planning": {"source": "ai", "level": "info"},
+    "model_reasoning": {"source": "ai", "level": "info"},
     "cached_decision_used": {"source": "redis", "level": "success"},
     "security_check": {"source": "security", "level": "info"},
     "tool_selected": {"source": "tool", "level": "info"},
+    "tool_proposal": {"source": "tool", "level": "info"},
     "gpu_metric": {"source": "gpu", "level": "info"},
     "action_allowed": {"source": "security", "level": "success"},
     "action_blocked": {"source": "security", "level": "warning"},
+    "final_answer": {"source": "ai", "level": "success"},
     "run_complete": {"source": "backend", "level": "success"},
     "run_failed": {"source": "backend", "level": "error"},
 }
@@ -54,15 +48,22 @@ def create_run(db: Session, task: str) -> models.Run:
     return run
 
 
-def save_event(db: Session, run_id: str, event_type: str, message: str) -> models.Event:
+def save_event(
+    db: Session,
+    run_id: str,
+    event_type: str,
+    message: str,
+    source: str | None = None,
+    level: str | None = None,
+) -> models.Event:
     """Create and save one event row."""
     metadata = get_event_metadata(event_type)
     event = models.Event(
         id=str(uuid.uuid4()),
         run_id=run_id,
         type=event_type,
-        source=metadata["source"],
-        level=metadata["level"],
+        source=source or metadata["source"],
+        level=level or metadata["level"],
         message=message,
         timestamp=datetime.utcnow(),
     )
@@ -90,9 +91,11 @@ async def save_and_send_event(
     run_id: str,
     event_type: str,
     message: str,
+    source: str | None = None,
+    level: str | None = None,
 ) -> None:
     """Save an event to SQLite and immediately stream it to the client."""
-    event = save_event(db, run_id, event_type, message)
+    event = save_event(db, run_id, event_type, message, source=source, level=level)
     await websocket.send_json(event_to_websocket_payload(event))
 
 
@@ -119,13 +122,51 @@ async def run_fake_agent_timeline(db: Session, websocket: WebSocket, task: str) 
         await asyncio.sleep(0.2)
         await save_and_send_event(db, websocket, run.id, "run_complete", "Run completed")
     else:
-        for event_type, message in FAKE_TIMELINE:
-            await save_and_send_event(db, websocket, run.id, event_type, message)
-            await asyncio.sleep(0.35)
+        await save_and_send_event(db, websocket, run.id, "run_started", "Run started")
+        await asyncio.sleep(0.25)
+
+        async for agent_event in run_agent(task):
+            await save_and_send_event(
+                db,
+                websocket,
+                run.id,
+                agent_event["type"],
+                agent_event["message"],
+                source=agent_event["source"],
+                level=agent_event["level"],
+            )
+
+            if agent_event["type"] == "tool_proposal":
+                await asyncio.sleep(0.25)
+                await save_and_send_event(
+                    db,
+                    websocket,
+                    run.id,
+                    "security_check",
+                    "Checking action against security policy",
+                )
+                await asyncio.sleep(0.25)
+                await save_and_send_event(
+                    db,
+                    websocket,
+                    run.id,
+                    "gpu_metric",
+                    "Estimated GPU cost calculated",
+                )
+                await asyncio.sleep(0.25)
+                await save_and_send_event(
+                    db,
+                    websocket,
+                    run.id,
+                    "action_allowed",
+                    "Action allowed",
+                )
 
         # This is a fake decision for the demo. A real project could store an
         # actual security/action decision here.
         set_cached_decision(task, "allow")
+        await asyncio.sleep(0.25)
+        await save_and_send_event(db, websocket, run.id, "run_complete", "Run completed")
 
     run.status = "complete"
     db.commit()

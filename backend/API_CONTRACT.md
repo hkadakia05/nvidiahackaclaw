@@ -72,12 +72,14 @@ The server streams events live and also saves them in SQLite:
 ```text
 run_started
 agent_planning
+model_reasoning
 cached_decision_used
 security_check
-tool_selected
+tool_proposal
 gpu_metric
 action_allowed
 action_blocked
+final_answer
 run_complete
 run_failed
 ```
@@ -122,6 +124,19 @@ It can also fetch saved run history later from the REST endpoints:
 GET /api/runs
 GET /api/runs/{run_id}
 ```
+
+## AI Agent Adapter
+
+The real AI agent will plug in later at:
+
+```text
+backend/app/agent_adapter.py
+```
+
+Today, `run_agent(task)` is a fake async generator that yields AI-shaped events
+such as `agent_planning`, `model_reasoning`, `tool_proposal`, and `final_answer`.
+It does not add `run_id` or `timestamp`; `run_manager.py` handles that when it
+saves events to SQLite and streams them to the WebSocket client.
 
 ## SQLite Schema Changes
 
