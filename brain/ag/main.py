@@ -110,6 +110,25 @@ def run_control_plane(task: str) -> dict[str, Any]:
             )
         )
 
+        continue
+
+    # fake execution output
+    output = f"completed step: {step}"
+
+    # verifier checks output
+    verification = verifier.verify_response(
+        output
+    )
+
+    print(
+        f"\n[CONTROL PLANE] verification result:\n{verification}"
+    )
+
+# final metrics
+router.show_metrics()
+
+print("complete")
+
     return {
         "task": task,
         "plan": plan,
