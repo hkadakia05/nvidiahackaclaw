@@ -1,0 +1,12 @@
+low_risk:
+  - ls
+  - pwd
+  - pytest
+
+medium_risk:
+  - pip install
+
+high_risk:
+  - git push
+  - rm
+  - docker build
