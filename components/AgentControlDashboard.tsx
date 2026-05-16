@@ -29,17 +29,20 @@ export default function AgentControlDashboard() {
   }, []);
 
   const agents = useMemo(() => deriveAgentsFromEvents(events), [events]);
+
   const blockedEvents = useMemo(
     () => events.filter(isBlockedOrDeniedEvent),
-    [events]
+    [events] //Filters events down to only blocked/denied ones
   );
+
   const alerts = useMemo(() => deriveAlertsFromEvents(events), [events]);
 
   const activeAgents = agents.filter(
     (agent) => agent.status === "running" || agent.status === "heavy-load"
-  ).length;
+  ).length; // count how many working
+
   const runningWorkflows = getWorkflowCount(agents);
-  const openAlerts = alerts.length;
+  const openAlerts = alerts.length; //computations
 
   return (
     <PageFrame
@@ -67,7 +70,7 @@ export default function AgentControlDashboard() {
           <div className="hidden text-right text-xs text-slate-500 xl:block">
             <p>Backend stream: {config.wsUrl}</p>
             <p>Run endpoint: {config.runUrl}</p>
-          </div>
+          </div> {/* Shows the WebSocket and run URLs only on extra-large screens. */}
         </div>
 
         <div className="grid grid-cols-5 gap-6 text-sm">
