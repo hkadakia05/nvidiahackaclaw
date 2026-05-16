@@ -4,21 +4,32 @@ import yaml
 from datetime import datetime
 from pathlib import Path
 
-# base directory for runner.py
+# base dir for runner.py so docker doesnt tweak out
 BASE_DIR = Path(__file__).resolve().parent
 
-# correct paths for policies + logs
-POLICY_FILE = BASE_DIR / "../policies/shell.yaml"
-LOG_FILE = BASE_DIR / "../logs/security.log"
+# paths for policies + logs n stuff
+POLICY_FILE = BASE_DIR.parent / "policies/shell.yaml"
+LOG_FILE = BASE_DIR.parent / "logs/security.log"
 
-# ld cmd for shell
+# load shell cmd policy before agent does dumb shit
 with open(POLICY_FILE, "r") as f:
 
     shell_policy = yaml.safe_load(f)
 
 blocked_commands = shell_policy["blocked_commands"]
 
+# filesystem policy so agent doesnt touch sus files
+FILESYSTEM_POLICY = BASE_DIR.parent / "policies/filesystem.yaml"
+FILESYSTEM_LOG = BASE_DIR.parent / "logs/filesystem.log"
 
+with open(FILESYSTEM_POLICY, "r") as f:
+
+    filesystem_policy = yaml.safe_load(f)
+
+blocked_paths = filesystem_policy["blocked_paths"]
+
+
+# log blocked cmd violations for audit trail grindset
 def log_violation(cmd):
     with open(LOG_FILE, "a") as log:
         log.write(
@@ -26,6 +37,7 @@ def log_violation(cmd):
         )
 
 
+# simulate agent execution requests
 def run_cmd(cmd):
     print(f"\n[AGENT REQUEST] {cmd}")
 
@@ -36,15 +48,8 @@ def run_cmd(cmd):
 
     print(f"[ALLOWED] {cmd}")
 
-# load filesystem policy
-with open(BASE_DIR / "../policies/filesystem.yaml", "r") as f:
-    filesystem_policy = yaml.safe_load(f)
 
-blocked_paths = filesystem_policy["blocked_paths"]
-
-FILESYSTEM_LOG = BASE_DIR / "../logs/filesystem.log"
-
-
+# filesystem violation logs bc we dont leak secrets in this household
 def log_filesystem_violation(path):
     with open(FILESYSTEM_LOG, "a") as log:
         log.write(
@@ -52,6 +57,7 @@ def log_filesystem_violation(path):
         )
 
 
+# simulate protected file access checks
 def access_file(path):
     print(f"\n[FILE ACCESS REQUEST] {path}")
 
@@ -60,11 +66,14 @@ def access_file(path):
         log_filesystem_violation(path)
         return
 
-    print(f"[File Access Granted] {path}")    
+    print(f"[FILE ACCESS GRANTED] {path}")
 
 
+# demo cmd requests
 run_cmd("ls")
 run_cmd("cat .env")
 run_cmd("rm -rf /")
+
+# demo filesystem requests
 access_file(".env")
 access_file("notes.txt")

@@ -58,4 +58,4 @@ USER sandboxuser
 
 
 #safety measure to prevent running as root
-CMD ["python", "runner.py"]
+CMD ["python", "sandbox/runner.py"]

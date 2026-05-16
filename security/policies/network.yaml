@@ -1,0 +1,7 @@
+allowed_domains:
+  - github.com
+  - api.nvidia.com
+  - build.nvidia.com
+
+blocked_domains:
+  - evil.com
