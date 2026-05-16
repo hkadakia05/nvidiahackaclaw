@@ -1,0 +1,7 @@
+blocked_commands:
+  - rm -rf /
+  - sudo
+  - shutdown
+  - reboot
+  - cat .env
+  - git push origin main
