@@ -148,10 +148,24 @@ async def run_fake_agent_timeline(db: Session, websocket: WebSocket, task: str) 
         await save_and_send_event(db, websocket, run.id, "run_complete", "Run completed")
     else:
         run_allowed = True
+        adapter_failed = False
         await save_and_send_event(db, websocket, run.id, "run_started", "Run started")
         await asyncio.sleep(0.25)
 
         async for agent_event in run_agent(task):
+            details = dict(agent_event.get("details", {}))
+            action = agent_event.get("action", {})
+            if action:
+                details.update(
+                    {
+                        "tool_name": action.get("tool_name"),
+                        "action_type": action.get("action_type"),
+                        "command": action.get("command"),
+                        "path": action.get("path"),
+                        "domain": action.get("domain"),
+                    }
+                )
+
             await save_and_send_event(
                 db,
                 websocket,
@@ -160,11 +174,13 @@ async def run_fake_agent_timeline(db: Session, websocket: WebSocket, task: str) 
                 agent_event["message"],
                 source=agent_event["source"],
                 level=agent_event["level"],
-                details={
-                    "tool_name": agent_event.get("action", {}).get("tool_name"),
-                    "action_type": agent_event.get("action", {}).get("action_type"),
-                },
+                details=details,
             )
+
+            if agent_event["type"] == "run_failed":
+                adapter_failed = True
+                run_allowed = False
+                break
 
             if agent_event["type"] == "tool_proposal":
                 action_allowed = await evaluate_and_run_action(
@@ -179,16 +195,17 @@ async def run_fake_agent_timeline(db: Session, websocket: WebSocket, task: str) 
                     break
 
         if not run_allowed:
-            run.status = "blocked"
+            run.status = "failed" if adapter_failed else "blocked"
             db.commit()
-            await asyncio.sleep(0.25)
-            await save_and_send_event(
-                db,
-                websocket,
-                run.id,
-                "run_failed",
-                "Run stopped by security policy",
-            )
+            if not adapter_failed:
+                await asyncio.sleep(0.25)
+                await save_and_send_event(
+                    db,
+                    websocket,
+                    run.id,
+                    "run_failed",
+                    "Run stopped by security policy",
+                )
             return run.id
 
         # This is a fake decision for the demo. A real project could store an

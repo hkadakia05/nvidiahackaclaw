@@ -1,12 +1,11 @@
 "use client";
 
 import PageFrame from "../../../components/PageFrame";
-import { policies } from "../../../lib/mockData";
 import {
   formatTime,
   levelClass,
   levelLabel,
-  policyStatusClass,
+  securityEventsFromEvents,
 } from "../../../lib/utils";
 import { useBackendRunStream } from "../../../lib/useBackendRunStream";
 
@@ -19,15 +18,7 @@ export default function PoliciesPage() {
     runAgentControl,
   } = useBackendRunStream();
 
-  const securityEvents = events.filter(
-    (event) =>
-      event.metadata?.source === "security" ||
-      event.type.includes("policy") ||
-      event.type.includes("security") ||
-      event.type === "action_blocked" ||
-      event.type === "approval_required" ||
-      event.type === "sandbox_violation"
-  );
+  const securityEvents = securityEventsFromEvents(events);
 
   return (
     <PageFrame
@@ -41,31 +32,12 @@ export default function PoliciesPage() {
         threshold policies.
       </p>
 
-      <table className="mt-6 w-full border-y border-slate-200 text-left text-sm">
-        <thead className="text-xs text-slate-500">
-          <tr className="border-b border-slate-200">
-            <th className="py-2 font-medium">Policy</th>
-            <th className="py-2 font-medium">Status</th>
-            <th className="py-2 font-medium">Description</th>
-            <th className="py-2 font-medium">Last triggered</th>
-          </tr>
-        </thead>
-
-        <tbody className="divide-y divide-slate-200">
-          {policies.map((policy) => (
-            <tr key={policy.id}>
-              <td className="py-3 font-medium">{policy.policy}</td>
-              <td className={`py-3 text-xs font-medium capitalize ${policyStatusClass(policy.status)}`}>
-                {policy.status.replace("-", " ")}
-              </td>
-              <td className="py-3 text-slate-600">{policy.description}</td>
-              <td className="py-3 font-mono text-xs text-slate-500">
-                {hasBackendEvents ? "Updated from event stream" : "Waiting for backend data"}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {!hasBackendEvents && (
+        <p className="mt-4 text-xs text-slate-500">
+          No backend policy decisions yet. Click Run AgentControl to stream
+          policy, sandbox, and audit events.
+        </p>
+      )}
 
       <section className="mt-8">
         <div className="mb-3 flex items-center justify-between">

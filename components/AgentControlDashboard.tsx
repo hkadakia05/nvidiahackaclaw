@@ -3,11 +3,12 @@
 import { useEffect, useMemo } from "react";
 
 import PageFrame from "./PageFrame";
-import type { AgentStatus } from "../types/dashboard";
-import { alerts, initialAgents } from "../lib/mockData";
 import {
+  deriveAgentsFromEvents,
+  deriveAlertsFromEvents,
   formatCurrency,
   getWorkflowCount,
+  isBlockedOrDeniedEvent,
   runNormalizationTests,
   statusClass,
 } from "../lib/utils";
@@ -22,29 +23,23 @@ export default function AgentControlDashboard() {
     isRunning,
     runAgentControl,
   } = useBackendRunStream();
-  const agents: AgentStatus[] = initialAgents;
 
   useEffect(() => {
     runNormalizationTests();
   }, []);
 
+  const agents = useMemo(() => deriveAgentsFromEvents(events), [events]);
   const blockedEvents = useMemo(
-    () =>
-      events.filter(
-        (event) =>
-          event.level === "blocked" ||
-          event.level === "denied" ||
-          event.type === "approval_required" ||
-          event.metadata?.decision === "requires_approval"
-      ),
+    () => events.filter(isBlockedOrDeniedEvent),
     [events]
   );
+  const alerts = useMemo(() => deriveAlertsFromEvents(events), [events]);
 
   const activeAgents = agents.filter(
     (agent) => agent.status === "running" || agent.status === "heavy-load"
   ).length;
   const runningWorkflows = getWorkflowCount(agents);
-  const openAlerts = alerts.filter((alert) => alert.status !== "resolved").length;
+  const openAlerts = alerts.length;
 
   return (
     <PageFrame
@@ -79,7 +74,7 @@ export default function AgentControlDashboard() {
           <div>
             <p className="text-xs text-slate-500">Backend status</p>
             <p className="mt-1 text-lg font-semibold capitalize tabular-nums">
-              {connectionStatus === "connected" ? "Connected" : "Fallback"}
+              {connectionStatus === "connected" ? "Connected" : "Waiting"}
             </p>
             <p className="text-xs text-slate-500">
               {hasBackendEvents ? "live events received" : "waiting for events"}
@@ -131,7 +126,9 @@ export default function AgentControlDashboard() {
           </div>
 
           <p className="text-xs text-slate-500">
-            Waiting for backend agents endpoint
+            {hasBackendEvents
+              ? "Derived from backend event telemetry"
+              : "Waiting for agent telemetry"}
           </p>
         </div>
 
@@ -149,51 +146,60 @@ export default function AgentControlDashboard() {
             </thead>
 
             <tbody className="divide-y divide-slate-200">
-              {agents.map((agent) => (
-                <tr key={agent.id}>
-                  <td className="py-3 pr-6">
-                    <p className="font-medium">{agent.name}</p>
-                    <p className="text-xs text-slate-500">{agent.role}</p>
-                  </td>
-
-                  <td
-                    className={`py-3 pr-6 text-xs font-medium capitalize ${statusClass(
-                      agent.status
-                    )}`}
-                  >
-                    {agent.status.replace("-", " ")}
-                  </td>
-
-                  <td className="py-3 pr-6">
-                    <div className="flex items-center gap-2">
-                      <span className="w-10 font-mono text-xs tabular-nums text-slate-700">
-                        {agent.gpuUsage}%
-                      </span>
-
-                      <div className="h-1.5 w-24 bg-slate-200">
-                        <div
-                          className="h-1.5 bg-slate-700"
-                          style={{
-                            width: `${Math.min(agent.gpuUsage, 100)}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </td>
-
-                  <td className="py-3 pr-6 font-mono text-xs tabular-nums text-slate-700">
-                    {formatCurrency(agent.costPerHour)}
-                  </td>
-
-                  <td className="py-3 pr-6 font-mono text-xs text-slate-500">
-                    {agent.workflow}
-                  </td>
-
-                  <td className="py-3 text-slate-700">
-                    {agent.currentAction}
+              {agents.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-4 text-slate-500">
+                    No backend events yet. Click Run AgentControl to start a
+                    control-plane run.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                agents.map((agent) => (
+                  <tr key={agent.id}>
+                    <td className="py-3 pr-6">
+                      <p className="font-medium">{agent.name}</p>
+                      <p className="text-xs text-slate-500">{agent.role}</p>
+                    </td>
+
+                    <td
+                      className={`py-3 pr-6 text-xs font-medium capitalize ${statusClass(
+                        agent.status
+                      )}`}
+                    >
+                      {agent.status.replace("-", " ")}
+                    </td>
+
+                    <td className="py-3 pr-6">
+                      <div className="flex items-center gap-2">
+                        <span className="w-10 font-mono text-xs tabular-nums text-slate-700">
+                          {agent.gpuUsage}%
+                        </span>
+
+                        <div className="h-1.5 w-24 bg-slate-200">
+                          <div
+                            className="h-1.5 bg-slate-700"
+                            style={{
+                              width: `${Math.min(agent.gpuUsage, 100)}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </td>
+
+                    <td className="py-3 pr-6 font-mono text-xs tabular-nums text-slate-700">
+                      {formatCurrency(agent.costPerHour)}
+                    </td>
+
+                    <td className="py-3 pr-6 font-mono text-xs text-slate-500">
+                      {agent.workflow}
+                    </td>
+
+                    <td className="py-3 text-slate-700">
+                      {agent.currentAction}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

@@ -33,16 +33,19 @@ export default function ActivityPage() {
 
       {!hasBackendEvents && (
         <p className="mt-4 text-xs text-slate-500">
-          Waiting for backend data. Click Run AgentControl to stream live events;
-          mock timeline entries remain visible until then.
+          No backend events yet. Click Run AgentControl to start a
+          control-plane run.
         </p>
       )}
 
       <div className="mt-6 divide-y divide-slate-200 border-y border-slate-200 text-sm">
-        {events
-          .slice()
-          .reverse()
-          .map((event) => (
+        {events.length === 0 ? (
+          <p className="py-3 text-slate-500">Waiting for backend event stream.</p>
+        ) : (
+          events
+            .slice()
+            .reverse()
+            .map((event) => (
             <div
               key={event.id}
               className="grid grid-cols-[88px_110px_1fr] gap-4 py-3"
@@ -70,7 +73,8 @@ export default function ActivityPage() {
                 </div>
               </div>
             </div>
-          ))}
+            ))
+        )}
       </div>
     </PageFrame>
   );
