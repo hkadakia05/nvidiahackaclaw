@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   LineChart,
   Line,
@@ -15,7 +15,7 @@ import {
   Bar,
 } from "recharts";
 
-import type { AgentEvent, AgentStatus, ChartPoint } from "../types/dashboard";
+import type { AgentEvent, AgentStatus, BackendEvent, ChartPoint, ConnectionStatus } from "../types/dashboard";
 
 import {
   alerts,
@@ -26,6 +26,12 @@ import {
   initialChartData,
   policies,
 } from "../lib/mockData";
+
+import {
+  checkBackendHealth,
+  createDashboardWebSocket,
+  startAgentRun,
+} from "../lib/api";
 
 import {
   createId,
@@ -47,29 +53,68 @@ export default function AgentControlDashboard() {
   const [events, setEvents] = useState<AgentEvent[]>(fallbackEvents);
   const [agents] = useState<AgentStatus[]>(initialAgents);
   const [chartData, setChartData] = useState<ChartPoint[]>(initialChartData);
-  const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "offline">("connecting");
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("checking");
   const [isRunning, setIsRunning] = useState(false);
   // FIX 1: isMounted suppresses time rendering on the server so SSR and client
   // always produce the same initial HTML, eliminating the hydration mismatch.
   const [isMounted, setIsMounted] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
+  const receivedBackendEventRef = useRef(false);
   const config = useMemo(() => getConfig(), []);
 
   useEffect(() => {
-    setIsMounted(true);
+    const timer = window.setTimeout(() => setIsMounted(true), 0);
     runNormalizationTests();
+
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const addDashboardEvent = useCallback((raw: BackendEvent | AgentEvent) => {
+    const normalized = normalizeEvent(raw);
+
+    if (!normalized) return;
+
+    if (normalized.type === "run_complete" || normalized.type === "run_failed") {
+      setIsRunning(false);
+    }
+
+    setEvents((current) => {
+      const shouldReplaceFallback = !receivedBackendEventRef.current;
+      receivedBackendEventRef.current = true;
+      const next = shouldReplaceFallback ? [normalized] : [...current, normalized];
+      return next.slice(-100);
+    });
+
+    setChartData((current) => {
+      const last = current[current.length - 1];
+      const nextPoint: ChartPoint = {
+        time: formatTime(normalized.timestamp),
+        gpu: Number(normalized.metadata?.gpuUsage ?? last?.gpu ?? 0),
+        savings: Number(normalized.metadata?.costSaved ?? last?.savings ?? 0),
+        cost: Number(normalized.metadata?.costPerHour ?? last?.cost ?? 0),
+      };
+
+      return [...current, nextPoint].slice(-24);
+    });
   }, []);
 
   useEffect(() => {
-    let receivedBackendEvent = false;
+    const controller = new AbortController();
+
+    checkBackendHealth(controller.signal)
+      .then(() => setConnectionStatus("connecting"))
+      .catch((error) => {
+        console.warn("Backend health check failed; using fallback dashboard data.", error);
+        setConnectionStatus("offline");
+      });
 
     if (typeof WebSocket === "undefined") {
-      setConnectionStatus("offline");
-      return;
+      window.setTimeout(() => setConnectionStatus("offline"), 0);
+      return () => controller.abort();
     }
 
     try {
-      const socket = new WebSocket(config.wsUrl);
+      const socket = createDashboardWebSocket();
       socketRef.current = socket;
 
       socket.onopen = () => {
@@ -78,50 +123,43 @@ export default function AgentControlDashboard() {
 
       socket.onmessage = (message) => {
         try {
-          const parsed = JSON.parse(message.data);
-          const normalized = normalizeEvent(parsed);
-
-          if (!normalized) return;
-
-          setEvents((current) => {
-            const shouldReplaceFallback = !receivedBackendEvent;
-            receivedBackendEvent = true;
-            const next = shouldReplaceFallback ? [normalized] : [...current, normalized];
-            return next.slice(-100);
-          });
-
-          setChartData((current) => {
-            const last = current[current.length - 1];
-            const nextPoint: ChartPoint = {
-              time: formatTime(normalized.timestamp),
-              gpu: Number(normalized.metadata?.gpuUsage ?? last?.gpu ?? 0),
-              savings: Number(normalized.metadata?.costSaved ?? last?.savings ?? 0),
-              cost: Number(normalized.metadata?.costPerHour ?? last?.cost ?? 0),
-            };
-
-            return [...current, nextPoint].slice(-24);
-          });
-        } catch {
-          // Ignore malformed backend events instead of crashing the UI.
+          addDashboardEvent(JSON.parse(message.data));
+        } catch (error) {
+          console.warn("Ignoring malformed backend WebSocket event.", error);
         }
       };
 
-      socket.onerror = () => {
+      socket.onerror = (error) => {
+        console.warn("Backend WebSocket connection failed.", error);
         setConnectionStatus("offline");
       };
 
       socket.onclose = () => {
-        setConnectionStatus("offline");
+        if (socketRef.current === socket) {
+          socketRef.current = null;
+        }
       };
 
-      return () => socket.close();
-    } catch {
-      setConnectionStatus("offline");
+      return () => {
+        controller.abort();
+        socket.close();
+      };
+    } catch (error) {
+      console.warn("Could not create backend WebSocket; using fallback dashboard data.", error);
+      window.setTimeout(() => setConnectionStatus("offline"), 0);
+      return () => controller.abort();
     }
-  }, [config.wsUrl]);
+  }, [addDashboardEvent]);
 
   const blockedEvents = useMemo(
-    () => events.filter((event) => event.level === "blocked" || event.level === "denied"),
+    () =>
+      events.filter(
+        (event) =>
+          event.level === "blocked" ||
+          event.level === "denied" ||
+          event.type === "approval_required" ||
+          event.metadata?.decision === "requires_approval"
+      ),
     [events]
   );
 
@@ -158,11 +196,33 @@ export default function AgentControlDashboard() {
     setEvents((current) => [...current, localEvent].slice(-100));
 
     try {
-      await fetch(config.runUrl, { method: "POST" });
-    } catch {
+      const existingSocket = socketRef.current;
+
+      if (existingSocket?.readyState === WebSocket.OPEN) {
+        existingSocket.send(JSON.stringify({ task: "test task" }));
+      } else {
+        socketRef.current = startAgentRun(
+          { task: "test task" },
+          {
+            onOpen: () => setConnectionStatus("connected"),
+            onEvent: addDashboardEvent,
+            onMalformedMessage: (raw) => console.warn("Ignoring malformed backend event.", raw),
+            onError: (error) => {
+              console.warn("Backend run WebSocket failed.", error);
+              setConnectionStatus("offline");
+              setIsRunning(false);
+            },
+            onClose: () => {
+              socketRef.current = null;
+              setIsRunning(false);
+            },
+          }
+        );
+      }
+    } catch (error) {
+      console.warn("Failed to start backend run; showing fallback event.", error);
       const offlineEvent: AgentEvent = {
         id: createId(),
-        // FIX 2: Was `Date Now()` (syntax error) — corrected to `Date.now()`.
         timestamp: new Date(Date.now()).toISOString(),
         type: "backend.unavailable",
         message: "Backend run endpoint unavailable; showing local fallback state",
@@ -171,7 +231,6 @@ export default function AgentControlDashboard() {
       };
 
       setEvents((current) => [...current, offlineEvent].slice(-100));
-    } finally {
       setIsRunning(false);
     }
   }

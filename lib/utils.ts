@@ -1,13 +1,11 @@
-import type { AgentEvent, AgentStatus, AlertItem, BrowserConfig, ClusterNode, EventLevel, PolicyStatus } from "../types/dashboard";
+import { API_BASE_URL, dashboardWebSocketUrl } from "./api";
+import type { AgentEvent, AgentStatus, AlertItem, BackendEvent, BrowserConfig, ClusterNode, EventLevel, PolicyStatus } from "../types/dashboard";
 
 declare global {
   interface Window {
     __AGENTCONTROL_CONFIG__?: BrowserConfig;
   }
 }
-
-const DEFAULT_WS_URL = "ws://localhost:8000/ws/run";
-const DEFAULT_RUN_URL = "http://localhost:8000/api/runs";
 
 export function getConfig() {
   const browserConfig =
@@ -16,8 +14,9 @@ export function getConfig() {
       : {};
 
   return {
-    wsUrl: browserConfig.wsUrl || DEFAULT_WS_URL,
-    runUrl: browserConfig.runUrl || DEFAULT_RUN_URL,
+    apiBaseUrl: browserConfig.apiBaseUrl || API_BASE_URL,
+    wsUrl: browserConfig.wsUrl || dashboardWebSocketUrl(),
+    runUrl: browserConfig.runUrl || `${API_BASE_URL}/ws/run`,
   };
 }
 
@@ -52,6 +51,45 @@ export function isEventLevel(value: unknown): value is EventLevel {
     value === "completed" ||
     value === "warning"
   );
+}
+
+export function normalizeBackendLevel(event: BackendEvent): EventLevel {
+  if (event.decision === "deny") return "blocked";
+  if (event.decision === "requires_approval") return "warning";
+  if (event.decision === "allow") return "approved";
+
+  if (
+    event.type === "action_blocked" ||
+    event.type === "sandbox_violation" ||
+    event.type === "security_denied"
+  ) {
+    return "blocked";
+  }
+
+  if (
+    event.type === "run_complete" ||
+    event.type === "sandbox_completed" ||
+    event.type === "audit_written"
+  ) {
+    return "completed";
+  }
+
+  if (
+    event.type === "action_allowed" ||
+    event.type === "security_allowed" ||
+    event.level === "success"
+  ) {
+    return "approved";
+  }
+
+  if (event.type === "run_failed" || event.type === "error" || event.level === "error") {
+    return "denied";
+  }
+
+  if (event.level === "warning") return "warning";
+  if (isEventLevel(event.level)) return event.level;
+
+  return "info";
 }
 
 export function levelLabel(level: EventLevel) {
@@ -143,22 +181,50 @@ export function normalizeMetadata(value: unknown): AgentEvent["metadata"] {
   return metadata;
 }
 
+function addMetadataValue(
+  metadata: AgentEvent["metadata"],
+  key: string,
+  value: unknown
+) {
+  if (
+    metadata &&
+    (typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean")
+  ) {
+    metadata[key] = value;
+  }
+}
+
 export function normalizeEvent(raw: unknown): AgentEvent | null {
   if (!raw || typeof raw !== "object") return null;
 
-  const event = raw as Partial<AgentEvent>;
+  const event = raw as BackendEvent;
 
   if (typeof event.message !== "string" || typeof event.type !== "string") {
     return null;
   }
+
+  const metadata = normalizeMetadata(event.metadata);
+  addMetadataValue(metadata, "run_id", event.run_id);
+  addMetadataValue(metadata, "source", event.source);
+  addMetadataValue(metadata, "action_type", event.action_type);
+  addMetadataValue(metadata, "tool_name", event.tool_name);
+  addMetadataValue(metadata, "command", event.command);
+  addMetadataValue(metadata, "path", event.path);
+  addMetadataValue(metadata, "domain", event.domain);
+  addMetadataValue(metadata, "decision", event.decision);
+  addMetadataValue(metadata, "risk_level", event.risk_level);
+  addMetadataValue(metadata, "policy_triggered", event.policy_triggered);
+  addMetadataValue(metadata, "reason", event.reason);
 
   return {
     id: typeof event.id === "string" ? event.id : createId(),
     timestamp: typeof event.timestamp === "string" ? event.timestamp : new Date().toISOString(),
     type: event.type,
     message: event.message,
-    level: isEventLevel(event.level) ? event.level : "info",
-    metadata: normalizeMetadata(event.metadata),
+    level: normalizeBackendLevel(event),
+    metadata,
   };
 }
 
