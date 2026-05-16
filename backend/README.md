@@ -34,6 +34,9 @@ backend - FastAPI app running with uvicorn
 redis   - official Redis image used as an optional cache
 ```
 
+Compose also mounts the repo-level `security/` folder into the backend
+container so the backend can read policies and write audit records.
+
 The API will run at:
 
 ```text
@@ -92,10 +95,21 @@ The backend creates a unique `run_id`, stores the run in SQLite, and streams tim
 {
   "run_id": "example-id",
   "type": "run_started",
+  "source": "backend",
+  "level": "info",
   "message": "Run started",
   "timestamp": "2026-05-15T12:00:00.000000"
 }
 ```
+
+To test a blocked security action, send a task that contains a blocked command:
+
+```json
+{ "task": "please run cat .env" }
+```
+
+That should stream security events such as `policy_evaluated`,
+`action_blocked`, `sandbox_violation`, and `run_failed`.
 
 ## Optional Redis Cache
 
@@ -127,8 +141,12 @@ backend/
     schemas.py
     run_manager.py
     redis_client.py
+    security/
+    security_service.py
   requirements.txt
   .env.example
+  API_CONTRACT.md
+  SECURITY_INTEGRATION.md
   README.md
 ```
 
