@@ -1,8 +1,16 @@
 "use client";
 
+import { useMemo } from "react";
+
 import PageFrame from "../../../components/PageFrame";
-import { clusterNodes, initialAgents } from "../../../lib/mockData";
-import { formatCurrency, getWorkflowCount, levelClass, levelLabel } from "../../../lib/utils";
+import {
+  deriveAgentsFromEvents,
+  formatCurrency,
+  getWorkflowCount,
+  isBlockedOrDeniedEvent,
+  levelClass,
+  levelLabel,
+} from "../../../lib/utils";
 import { useBackendRunStream } from "../../../lib/useBackendRunStream";
 
 export default function FinalReportPage() {
@@ -15,18 +23,11 @@ export default function FinalReportPage() {
     runAgentControl,
   } = useBackendRunStream();
 
-  const blockedEvents = events.filter(
-    (event) => event.level === "blocked" || event.level === "denied"
-  );
+  const agents = useMemo(() => deriveAgentsFromEvents(events), [events]);
+  const blockedEvents = events.filter(isBlockedOrDeniedEvent);
   const approvedCount = events.filter((event) => event.level === "approved").length;
   const completedCount = events.filter((event) => event.level === "completed").length;
-  const activeAgents = initialAgents.filter(
-    (agent) => agent.status === "running" || agent.status === "heavy-load"
-  ).length;
-  const runningWorkflows = getWorkflowCount(initialAgents);
-  const availableGpus = clusterNodes.reduce((sum, node) => sum + node.gpus, 0);
-  const allocatedGpus = clusterNodes.reduce((sum, node) => sum + node.usedGpus, 0);
-  const queuedWorkloads = clusterNodes.reduce((sum, node) => sum + node.queue, 0);
+  const runningWorkflows = getWorkflowCount(agents);
   const totalSavings = chartData[chartData.length - 1]?.savings ?? 0;
 
   return (
@@ -43,8 +44,8 @@ export default function FinalReportPage() {
         </p>
         {!hasBackendEvents && (
           <p className="mt-4 text-xs text-slate-500">
-            Waiting for backend data. Click Run AgentControl to generate a live
-            summary from streamed backend events.
+            No run data yet. Click Run AgentControl to generate a backend
+            event-driven summary.
           </p>
         )}
       </div>
@@ -68,7 +69,7 @@ export default function FinalReportPage() {
         <div>
           <p className="text-xs text-slate-500">Estimated savings</p>
           <p className="mt-1 text-lg font-semibold tabular-nums">
-            {formatCurrency(totalSavings)}
+            {hasBackendEvents ? formatCurrency(totalSavings) : "--"}
           </p>
         </div>
       </section>
@@ -76,24 +77,27 @@ export default function FinalReportPage() {
       <section className="mt-8 max-w-4xl text-sm leading-6 text-slate-700">
         <h2 className="text-sm font-semibold text-slate-950">Run summary</h2>
 
-        <p className="mt-3">
-          AgentControl completed the CI/CD validation flow with policy
-          enforcement enabled. Planning, routing, cache reuse, sandbox execution,
-          GPU allocation, and safety checks were visible in the event stream.
-        </p>
+        {!hasBackendEvents ? (
+          <p className="mt-3">No run data yet.</p>
+        ) : (
+          <>
+            <p className="mt-3">
+              AgentControl streamed backend-generated control-plane telemetry
+              with policy enforcement enabled.
+            </p>
 
-        <p className="mt-3">
-          The current report shows {completedCount} completed events,{" "}
-          {approvedCount} approved actions, {blockedEvents.length} blocked or
-          denied actions, {activeAgents} active agents, and {runningWorkflows}{" "}
-          tracked workflows.
-        </p>
+            <p className="mt-3">
+              The current report shows {completedCount} completed events,{" "}
+              {approvedCount} approved actions, {blockedEvents.length} blocked
+              or denied actions, {agents.length} observed agents, and{" "}
+              {runningWorkflows} tracked run ids.
+            </p>
 
-        <p className="mt-3">
-          Infrastructure usage currently shows {allocatedGpus}/{availableGpus}{" "}
-          GPUs allocated with {queuedWorkloads} queued workloads. Estimated GPU
-          savings for this run are {formatCurrency(totalSavings)}.
-        </p>
+            <p className="mt-3">
+              Estimated GPU savings for this run are {formatCurrency(totalSavings)}.
+            </p>
+          </>
+        )}
       </section>
 
       <section className="mt-8">

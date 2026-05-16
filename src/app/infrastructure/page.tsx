@@ -1,19 +1,31 @@
+"use client";
+
 import PageFrame from "../../../components/PageFrame";
-import { clusterNodes } from "../../../lib/mockData";
-import { nodeStatusClass } from "../../../lib/utils";
+import { useBackendRunStream } from "../../../lib/useBackendRunStream";
 
 export default function InfrastructurePage() {
+  const {
+    connectionStatus,
+    hasBackendEvents,
+    isRunning,
+    runAgentControl,
+  } = useBackendRunStream();
+
   return (
-    <PageFrame>
+    <PageFrame
+      connectionStatus={connectionStatus}
+      isRunning={isRunning}
+      onRunAgentControl={runAgentControl}
+    >
       <h1 className="text-2xl font-semibold tracking-tight">Infrastructure</h1>
       <p className="mt-1 text-sm text-slate-600">
         View GPU nodes, utilization, workloads, queue pressure, and cluster health.
       </p>
-      <p className="mt-4 text-xs text-slate-500">
-        {/* TODO: Replace placeholder rows when the backend exposes infrastructure metrics. */}
-        Waiting for backend data. The backend does not expose infrastructure
-        metrics yet, so this page keeps the frontend layout with placeholder data.
-      </p>
+      {!hasBackendEvents && (
+        <p className="mt-4 text-xs text-slate-500">
+          Waiting for backend infrastructure telemetry.
+        </p>
+      )}
 
       <table className="mt-6 w-full border-y border-slate-200 text-left text-sm">
         <thead className="text-xs text-slate-500">
@@ -27,21 +39,12 @@ export default function InfrastructurePage() {
           </tr>
         </thead>
 
-        <tbody className="divide-y divide-slate-200">
-          {clusterNodes.map((node) => (
-            <tr key={node.id}>
-              <td className="py-3 font-mono text-xs">{node.name}</td>
-              <td className={`py-3 text-xs font-medium capitalize ${nodeStatusClass(node.status)}`}>
-                {node.status}
-              </td>
-              <td className="py-3 font-mono text-xs">
-                {node.usedGpus}/{node.gpus}
-              </td>
-              <td className="py-3 font-mono text-xs">{node.utilization}%</td>
-              <td className="py-3 font-mono text-xs">{node.workloads}</td>
-              <td className="py-3 font-mono text-xs">{node.queue}</td>
-            </tr>
-          ))}
+        <tbody>
+          <tr>
+            <td colSpan={6} className="py-3 text-slate-500">
+              No backend infrastructure events yet.
+            </td>
+          </tr>
         </tbody>
       </table>
     </PageFrame>

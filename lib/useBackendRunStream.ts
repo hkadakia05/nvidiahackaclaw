@@ -2,25 +2,43 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentEvent, BackendEvent, ChartPoint, ConnectionStatus } from "../types/dashboard";
-import { fallbackEvents, initialChartData } from "./mockData";
 import {
   checkBackendHealth,
   createDashboardWebSocket,
   startAgentRun,
 } from "./api";
 import {
-  createId,
   formatTime,
   getConfig,
   normalizeEvent,
 } from "./utils";
 
-export function useBackendRunStream(initialEvents: AgentEvent[] = fallbackEvents) {
-  const [events, setEvents] = useState<AgentEvent[]>(initialEvents);
-  const [chartData, setChartData] = useState<ChartPoint[]>(initialChartData);
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function closeSocketQuietly(socket: WebSocket | null) {
+  if (!socket || socket.readyState === WebSocket.CLOSED) return;
+
+  try {
+    socket.close();
+  } catch (error) {
+    console.warn("Failed to close backend WebSocket during cleanup.", error);
+  }
+}
+
+let sharedEvents: AgentEvent[] = [];
+let sharedChartData: ChartPoint[] = [];
+let sharedHasBackendEvents = false;
+
+export function useBackendRunStream(initialEvents: AgentEvent[] = []) {
+  const [events, setEvents] = useState<AgentEvent[]>(
+    sharedEvents.length > 0 ? sharedEvents : initialEvents
+  );
+  const [chartData, setChartData] = useState<ChartPoint[]>(sharedChartData);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("checking");
   const [isRunning, setIsRunning] = useState(false);
-  const [hasBackendEvents, setHasBackendEvents] = useState(false);
+  const [hasBackendEvents, setHasBackendEvents] = useState(sharedHasBackendEvents);
   const socketRef = useRef<WebSocket | null>(null);
   const receivedBackendEventRef = useRef(false);
   const config = useMemo(() => getConfig(), []);
@@ -34,15 +52,23 @@ export function useBackendRunStream(initialEvents: AgentEvent[] = fallbackEvents
       setIsRunning(false);
     }
 
+    sharedHasBackendEvents = true;
     setHasBackendEvents(true);
     setEvents((current) => {
-      const shouldReplaceFallback = !receivedBackendEventRef.current;
       receivedBackendEventRef.current = true;
-      const next = shouldReplaceFallback ? [normalized] : [...current, normalized];
-      return next.slice(-100);
+      const next = [...current, normalized];
+      sharedEvents = next.slice(-100);
+      return sharedEvents;
     });
 
     setChartData((current) => {
+      const hasMetric =
+        normalized.metadata?.gpuUsage !== undefined ||
+        normalized.metadata?.costSaved !== undefined ||
+        normalized.metadata?.costPerHour !== undefined;
+
+      if (!hasMetric) return current;
+
       const last = current[current.length - 1];
       const nextPoint: ChartPoint = {
         time: formatTime(normalized.timestamp),
@@ -51,18 +77,24 @@ export function useBackendRunStream(initialEvents: AgentEvent[] = fallbackEvents
         cost: Number(normalized.metadata?.costPerHour ?? last?.cost ?? 0),
       };
 
-      return [...current, nextPoint].slice(-24);
+      sharedChartData = [...current, nextPoint].slice(-24);
+      return sharedChartData;
     });
   }, []);
 
   useEffect(() => {
     const controller = new AbortController();
     let socket: WebSocket | null = null;
+    let isCleaningUp = false;
 
     try {
       checkBackendHealth(controller.signal)
         .then(() => setConnectionStatus("connecting"))
         .catch((error) => {
+          if (controller.signal.aborted || isAbortError(error)) {
+            return;
+          }
+
           console.warn("Backend health check failed; using fallback dashboard data.", error);
           setConnectionStatus("offline");
         });
@@ -84,6 +116,10 @@ export function useBackendRunStream(initialEvents: AgentEvent[] = fallbackEvents
         }
       };
       socket.onerror = (error) => {
+        if (isCleaningUp || socket?.readyState === WebSocket.CLOSING) {
+          return;
+        }
+
         console.warn("Backend WebSocket connection failed.", error);
         setConnectionStatus("offline");
       };
@@ -98,27 +134,14 @@ export function useBackendRunStream(initialEvents: AgentEvent[] = fallbackEvents
     }
 
     return () => {
+      isCleaningUp = true;
       controller.abort();
-
-      if (socket && socket.readyState !== WebSocket.CLOSED) {
-        socket.close();
-      }
+      closeSocketQuietly(socket);
     };
   }, [addDashboardEvent]);
 
   const runAgentControl = useCallback(() => {
     setIsRunning(true);
-
-    const localEvent: AgentEvent = {
-      id: createId(),
-      timestamp: new Date().toISOString(),
-      type: "run.started",
-      message: "AgentControl run requested from frontend",
-      level: "info",
-      metadata: { source: "ui" },
-    };
-
-    setEvents((current) => [...current, localEvent].slice(-100));
 
     try {
       const existingSocket = socketRef.current;
@@ -145,22 +168,10 @@ export function useBackendRunStream(initialEvents: AgentEvent[] = fallbackEvents
         );
       }
     } catch (error) {
-      console.warn("Failed to start backend run; showing fallback event.", error);
-      const offlineEvent: AgentEvent = {
-        id: createId(),
-        timestamp: new Date(Date.now()).toISOString(),
-        type: "backend.unavailable",
-        message: "Backend run endpoint unavailable; showing local fallback state",
-        level: "denied",
-        metadata: { runUrl: config.runUrl },
-      };
-
-      setEvents((current) =>
-        [...current, offlineEvent].slice(-100)
-      );
+      console.warn("Failed to start backend run.", error);
       setIsRunning(false);
     }
-  }, [addDashboardEvent, config.runUrl]);
+  }, [addDashboardEvent]);
 
   return {
     addDashboardEvent,

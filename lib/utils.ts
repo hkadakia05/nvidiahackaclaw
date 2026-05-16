@@ -217,6 +217,21 @@ export function normalizeEvent(raw: unknown): AgentEvent | null {
   addMetadataValue(metadata, "risk_level", event.risk_level);
   addMetadataValue(metadata, "policy_triggered", event.policy_triggered);
   addMetadataValue(metadata, "reason", event.reason);
+  addMetadataValue(metadata, "agent", event.agent);
+  addMetadataValue(metadata, "route", event.route);
+  addMetadataValue(metadata, "gpu_cost", event.gpu_cost);
+  addMetadataValue(metadata, "approved", event.approved);
+  addMetadataValue(metadata, "worker_agent_name", event.worker_agent_name);
+  addMetadataValue(metadata, "worker_agent_type", event.worker_agent_type);
+  addMetadataValue(metadata, "worker_agent_status", event.worker_agent_status);
+  addMetadataValue(metadata, "requested_action", event.requested_action);
+  addMetadataValue(metadata, "requested_tool", event.requested_tool);
+  addMetadataValue(metadata, "requested_tool_action", event.requested_tool_action);
+  addMetadataValue(metadata, "model", event.model);
+  addMetadataValue(metadata, "estimated_gpu_cost", event.estimated_gpu_cost);
+  addMetadataValue(metadata, "budget_decision", event.budget_decision);
+  addMetadataValue(metadata, "security_decision", event.security_decision);
+  addMetadataValue(metadata, "verifier_decision", event.verifier_decision);
 
   return {
     id: typeof event.id === "string" ? event.id : createId(),
@@ -274,4 +289,126 @@ export function formatCurrency(value: number) {
 
 export function getWorkflowCount(agents: AgentStatus[]) {
   return new Set(agents.map((agent) => agent.workflow)).size;
+}
+
+function metadataString(event: AgentEvent, key: string) {
+  const value = event.metadata?.[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function metadataNumber(event: AgentEvent, key: string) {
+  const value = event.metadata?.[key];
+
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  return undefined;
+}
+
+function agentStatusFromEvent(event: AgentEvent): AgentStatus["status"] {
+  const status = metadataString(event, "worker_agent_status");
+
+  if (
+    status === "idle" ||
+    status === "running" ||
+    status === "paused" ||
+    status === "blocked" ||
+    status === "completed" ||
+    status === "heavy-load"
+  ) {
+    return status;
+  }
+
+  if (event.level === "blocked" || event.level === "denied") return "blocked";
+  if (event.level === "completed" || event.type === "run_complete") return "completed";
+  if ((metadataNumber(event, "gpuUsage") ?? 0) >= 85) return "heavy-load";
+  return "running";
+}
+
+export function deriveAgentsFromEvents(events: AgentEvent[]): AgentStatus[] {
+  const agents = new Map<string, AgentStatus>();
+
+  for (const event of events) {
+    const name = metadataString(event, "worker_agent_name");
+    if (!name) continue;
+
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const gpuUsage =
+      metadataNumber(event, "gpuUsage") ??
+      metadataNumber(event, "estimated_gpu_cost") ??
+      metadataNumber(event, "gpu_cost") ??
+      0;
+    const costPerHour =
+      metadataNumber(event, "costPerHour") ??
+      metadataNumber(event, "estimated_gpu_cost") ??
+      0;
+
+    agents.set(id, {
+      id,
+      name,
+      role: metadataString(event, "worker_agent_type") ?? "backend simulated worker",
+      status: agentStatusFromEvent(event),
+      gpuUsage,
+      costPerHour,
+      currentAction:
+        metadataString(event, "requested_tool_action") ??
+        metadataString(event, "requested_action") ??
+        event.message,
+      workflow: metadataString(event, "run_id") ?? "current run",
+    });
+  }
+
+  return Array.from(agents.values());
+}
+
+export function isBlockedOrDeniedEvent(event: AgentEvent) {
+  return (
+    event.level === "blocked" ||
+    event.level === "denied" ||
+    event.type === "action_blocked" ||
+    event.type === "approval_required" ||
+    event.type === "sandbox_violation" ||
+    event.metadata?.decision === "deny" ||
+    event.metadata?.decision === "requires_approval"
+  );
+}
+
+export function deriveAlertsFromEvents(events: AgentEvent[]): AlertItem[] {
+  return events
+    .filter(
+      (event) =>
+        event.level === "warning" ||
+        event.level === "denied" ||
+        event.level === "blocked" ||
+        event.type === "run_failed" ||
+        event.type === "security_warning" ||
+        event.type === "sandbox_violation" ||
+        event.type === "resource_limit_hit"
+    )
+    .map((event) => ({
+      id: event.id,
+      severity: event.level === "warning" ? "medium" : "high",
+      title: event.type.replaceAll("_", " "),
+      description: event.message,
+      timestamp: event.timestamp,
+      status: event.type === "run_failed" ? "open" : "watching",
+    }));
+}
+
+export function securityEventsFromEvents(events: AgentEvent[]) {
+  return events.filter(
+    (event) =>
+      event.metadata?.source === "security" ||
+      event.type.includes("policy") ||
+      event.type.includes("security") ||
+      event.type === "action_blocked" ||
+      event.type === "action_allowed" ||
+      event.type === "approval_required" ||
+      event.type === "sandbox_violation" ||
+      event.type === "resource_check" ||
+      event.type === "audit_written"
+  );
 }
