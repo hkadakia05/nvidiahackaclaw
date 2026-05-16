@@ -22,6 +22,25 @@ FAKE_TIMELINE = [
 ]
 
 
+EVENT_METADATA = {
+    "run_started": {"source": "backend", "level": "info"},
+    "agent_planning": {"source": "ai", "level": "info"},
+    "cached_decision_used": {"source": "redis", "level": "success"},
+    "security_check": {"source": "security", "level": "info"},
+    "tool_selected": {"source": "tool", "level": "info"},
+    "gpu_metric": {"source": "gpu", "level": "info"},
+    "action_allowed": {"source": "security", "level": "success"},
+    "action_blocked": {"source": "security", "level": "warning"},
+    "run_complete": {"source": "backend", "level": "success"},
+    "run_failed": {"source": "backend", "level": "error"},
+}
+
+
+def get_event_metadata(event_type: str) -> dict:
+    """Return frontend-friendly display metadata for an event type."""
+    return EVENT_METADATA.get(event_type, {"source": "backend", "level": "info"})
+
+
 def create_run(db: Session, task: str) -> models.Run:
     """Create and save a new run row."""
     run = models.Run(
@@ -37,10 +56,13 @@ def create_run(db: Session, task: str) -> models.Run:
 
 def save_event(db: Session, run_id: str, event_type: str, message: str) -> models.Event:
     """Create and save one event row."""
+    metadata = get_event_metadata(event_type)
     event = models.Event(
         id=str(uuid.uuid4()),
         run_id=run_id,
         type=event_type,
+        source=metadata["source"],
+        level=metadata["level"],
         message=message,
         timestamp=datetime.utcnow(),
     )
@@ -55,6 +77,8 @@ def event_to_websocket_payload(event: models.Event) -> dict:
     return {
         "run_id": event.run_id,
         "type": event.type,
+        "source": event.source,
+        "level": event.level,
         "message": event.message,
         "timestamp": event.timestamp.isoformat(),
     }

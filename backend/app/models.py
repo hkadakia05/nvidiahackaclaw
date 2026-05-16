@@ -35,6 +35,8 @@ class Event(Base):
     id = Column(String, primary_key=True, index=True)
     run_id = Column(String, ForeignKey("runs.id"), nullable=False, index=True)
     type = Column(String, nullable=False)
+    source = Column(String, nullable=False, default="backend")
+    level = Column(String, nullable=False, default="info")
     message = Column(String, nullable=False)
     timestamp = Column(DateTime, nullable=False, default=datetime.utcnow)
 

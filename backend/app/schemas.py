@@ -9,6 +9,8 @@ class EventOut(BaseModel):
     id: str
     run_id: str
     type: str
+    source: str
+    level: str
     message: str
     timestamp: datetime
 

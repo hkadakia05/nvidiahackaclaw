@@ -22,6 +22,19 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/")
+def root() -> dict:
+    """Friendly index route that points people to the useful backend URLs."""
+    return {
+        "name": "Hackathon Agent Backend",
+        "status": "running",
+        "docs": "/docs",
+        "health": "/health",
+        "websocket": "/ws/run",
+        "runs": "/api/runs",
+    }
+
+
 @app.websocket("/ws/run")
 async def websocket_run(websocket: WebSocket) -> None:
     """
