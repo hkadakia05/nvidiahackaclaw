@@ -1,91 +1,113 @@
-#main for agents orchestration control plane
-# main orchestration runtime
-# ties together planning, routing, budgeting, and verification
+"""Control-plane orchestration for the AgentControl backend.
 
-from agents.planningag import PlanningAgent
-from agents.gpurtag import GPURouterAgent
-from agents.budgetingag import BudgetingAgent
-from agents.verifyingag import VerifyingAgent
+This module intentionally exposes functions instead of running at import time
+so FastAPI can call the agent system safely for each WebSocket run.
+"""
 
-# fake llm placeholder rn until real nemotron hookup
-class FakeLLM:
+from __future__ import annotations
 
-    def invoke(self, prompt):
+import re
+from dataclasses import dataclass
+from typing import Any
 
-        return """
-        1. scan repository
-        2. analyze dependencies
-        3. generate security report
-        """
+from .agents.budgetingag import BudgetingAgent
+from .agents.gpurtag import GPURouterAgent
+from .agents.planningag import PlanningAgent
+from .agents.verifyingag import VerifyingAgent
 
 
-# fake parser compatibility for langchain pipe chain
 class FakeChainLLM:
+    """Small LangChain-compatible placeholder until the real model is wired."""
 
-    def __ror__(self, other):
+    def __ror__(self, other: Any) -> "FakeChainLLM":
         return self
 
-    def invoke(self, inputs):
+    def invoke(self, inputs: dict[str, Any]) -> str:
+        task = str(inputs.get("task") or inputs.get("response") or "")
 
-        return """
-        1. scan repository
-        2. analyze dependencies
-        3. generate security report
-        """
+        if "response" in inputs:
+            return "APPROVED"
+
+        if not task:
+            return "1. inspect request\n2. choose execution path\n3. verify output"
+
+        if "security" in task.lower() or "vulnerab" in task.lower():
+            return (
+                "1. scan repository\n"
+                "2. analyze dependencies\n"
+                "3. generate security report"
+            )
+
+        return (
+            "1. understand request\n"
+            "2. route compute workload\n"
+            "3. verify final response"
+        )
 
 
-# init fake llm
-fake_llm = FakeChainLLM()
+@dataclass(frozen=True)
+class AgentStepResult:
+    step: str
+    route: str
+    gpu_cost: int
+    approved: bool
+    output: str | None
+    verification: str | None
 
-# init agents
-planner = PlanningAgent(fake_llm)
-router = GPURouterAgent()
-budgeter = BudgetingAgent()
-verifier = VerifyingAgent(fake_llm)
 
-# incoming task
-task = "analyze security vulnerabilities in github repository"
+def parse_plan_steps(plan: str) -> list[str]:
+    """Convert a numbered text plan into step strings."""
+    steps: list[str] = []
 
-print("\n========== CONTROL PLANE START ==========")
+    for line in plan.splitlines():
+        cleaned = re.sub(r"^\s*(?:[-*]|\d+[.)])\s*", "", line).strip()
+        if cleaned:
+            steps.append(cleaned)
 
-# planner creates execution steps
-plan = planner.create_plan(task)
+    return steps or ["understand request", "route compute workload", "verify final response"]
 
-# fake parsed steps for MVP rn
-steps = [
-    "scan repository",
-    "analyze dependencies",
-    "generate security report"
-]
 
-# execute each step
-for step in steps:
-
-    print(f"\n========== EXECUTING STEP ==========")
-    print(f"[STEP] {step}")
-
-    # gpu route decision
-    route = router.route_task(step)
-
-    # fake gpu cost values
+def gpu_cost_for_route(route: str) -> int:
     if route == "nemotron-super":
-        gpu_cost = 50
+        return 50
+    if route == "nemotron-nano":
+        return 20
+    return 0
 
-    elif route == "nemotron-nano":
-        gpu_cost = 20
 
-    else:
-        gpu_cost = 0
+def run_control_plane(task: str) -> dict[str, Any]:
+    """Run planning, GPU routing, budgeting, and verification for one task."""
+    llm = FakeChainLLM()
+    planner = PlanningAgent(llm)
+    router = GPURouterAgent()
+    budgeter = BudgetingAgent()
+    verifier = VerifyingAgent(llm)
 
-    # budget approval check
-    approved = budgeter.approve_gpu_usage(
-        gpu_cost
-    )
+    plan = planner.create_plan(task)
+    steps = parse_plan_steps(plan)
+    step_results: list[AgentStepResult] = []
 
-    if not approved:
+    for step in steps:
+        route = router.route_task(step)
+        gpu_cost = gpu_cost_for_route(route)
+        approved = budgeter.approve_gpu_usage(gpu_cost)
 
-        print(
-            "[CONTROL PLANE] execution denied due to budget"
+        output: str | None = None
+        verification: str | None = None
+
+        if approved:
+            output = f"completed step: {step}"
+            verification = verifier.verify_response(output)
+
+        step_results.append(
+            AgentStepResult(
+                step=step,
+                route=route,
+                gpu_cost=gpu_cost,
+                approved=approved,
+                output=output,
+                verification=verification,
+            )
         )
 
         continue
@@ -107,3 +129,22 @@ router.show_metrics()
 
 print("complete")
 
+    return {
+        "task": task,
+        "plan": plan,
+        "steps": [result.__dict__ for result in step_results],
+        "metrics": {
+            "gpu_calls_requested": router.gpu_calls_requested,
+            "gpu_calls_approved": router.gpu_calls_approved,
+            "gpu_calls_avoided": router.gpu_calls_avoided,
+            "cache_hits": router.cache_hits,
+            "estimated_credits_saved_percent": 38,
+            "gpu_budget": budgeter.daily_gpu_budget,
+            "gpu_usage": budgeter.current_gpu_usage,
+        },
+    }
+
+
+if __name__ == "__main__":
+    result = run_control_plane("analyze security vulnerabilities in github repository")
+    print(result)

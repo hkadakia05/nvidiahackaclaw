@@ -39,7 +39,7 @@ def create_db_tables() -> None:
 
 
 def add_event_metadata_columns_if_missing() -> None:
-    """Add source/level columns to an existing local SQLite events table."""
+    """Add newer event columns to an existing local SQLite events table."""
     inspector = inspect(engine)
 
     if "events" not in inspector.get_table_names():
@@ -56,6 +56,11 @@ def add_event_metadata_columns_if_missing() -> None:
         if "level" not in existing_columns:
             connection.execute(
                 text("ALTER TABLE events ADD COLUMN level VARCHAR NOT NULL DEFAULT 'info'")
+            )
+
+        if "metadata_json" not in existing_columns:
+            connection.execute(
+                text("ALTER TABLE events ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'")
             )
 
 

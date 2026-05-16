@@ -1,8 +1,11 @@
-#planning agent 
 # planning agent
 
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
+try:
+    from langchain_core.output_parsers import StrOutputParser
+    from langchain_core.prompts import ChatPromptTemplate
+except ImportError:
+    ChatPromptTemplate = None
+    StrOutputParser = None
 
 
 class PlanningAgent:
@@ -10,6 +13,11 @@ class PlanningAgent:
     def __init__(self, llm):
 
         self.name = "planning-agent"
+        self.llm = llm
+
+        if ChatPromptTemplate is None or StrOutputParser is None:
+            self.chain = None
+            return
 
         self.prompt = ChatPromptTemplate.from_template(
             """
@@ -30,9 +38,12 @@ class PlanningAgent:
 
         print(f"\n[PLANNER] analyzing task: {task}")
 
-        result = self.chain.invoke({
-            "task": task
-        })
+        if self.chain is None:
+            result = self.llm.invoke({"task": task})
+        else:
+            result = self.chain.invoke({
+                "task": task
+            })
 
         print(f"\n[PLANNER OUTPUT]\n{result}")
 

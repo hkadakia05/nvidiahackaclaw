@@ -4,6 +4,7 @@ services:
       context: ./backend
     environment:
       REDIS_URL: redis://redis:6379/0
+      SECURITY_ROOT: /security
     ports:
       - "8000:8000"
     depends_on:
@@ -11,6 +12,11 @@ services:
     volumes:
       # Keep the SQLite database file on your machine while developing.
       - ./backend:/app
+      # Mount the protected security engine so the backend can read policies
+      # and write audit logs without copying or modifying security code.
+      - ./security:/security
+      # Mount the merged agent control plane used by backend/app/agent_adapter.py.
+      - ./brain:/app/brain
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   redis:
