@@ -8,6 +8,11 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.agent_adapter import run_agent
+from app import repo_analysis
+import os
+import sys
+import threading
+import queue
 from app.redis_client import get_cached_decision, set_cached_decision
 from app.security import SecurityAction, SecurityService
 
@@ -123,7 +128,7 @@ async def save_and_send_event(
     await websocket.send_json(event_to_websocket_payload(event))
 
 
-async def run_fake_agent_timeline(db: Session, websocket: WebSocket, task: str) -> str:
+async def run_fake_agent_timeline(db: Session, websocket: WebSocket, task: str, github_url: str | None = None) -> str:
     """
     Create a run, stream fake timeline events, and return the new run id.
 
@@ -151,6 +156,66 @@ async def run_fake_agent_timeline(db: Session, websocket: WebSocket, task: str) 
         adapter_failed = False
         await save_and_send_event(db, websocket, run.id, "run_started", "Run started")
         await asyncio.sleep(0.25)
+
+        # If a GitHub URL is provided, attempt to launch the external agent runtime
+        # at C:\Gauri\test_gpugodfather\gpu-agent-runtime\main.py. Stream process
+        # stdout back to the frontend. Fall back to existing flows when no URL.
+        if github_url:
+            runtime_path = r"C:\Gauri\test_gpugodfather\gpu-agent-runtime\main.py"
+            if not os.path.exists(runtime_path):
+                await save_and_send_event(db, websocket, run.id, "run_failed", "Agent runtime not found")
+                run.status = "failed"
+                db.commit()
+                return run.id
+
+            try:
+                await save_and_send_event(db, websocket, run.id, "runtime_started", f"Starting agent runtime for {github_url}")
+
+                env = os.environ.copy()
+                env["TARGET_GITHUB_URL"] = github_url
+                env["ENABLE_WEBSOCKET"] = "false"
+
+                proc = await asyncio.create_subprocess_exec(
+                    sys.executable,
+                    runtime_path,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                    env=env,
+                )
+
+                # Read stdout lines and stream them as events
+                assert proc.stdout is not None
+                while True:
+                    line = await proc.stdout.readline()
+                    if not line:
+                        break
+                    text = line.decode(errors="replace").rstrip()
+                    await save_and_send_event(db, websocket, run.id, "runtime_output", text)
+
+                returncode = await proc.wait()
+                if returncode != 0:
+                    await save_and_send_event(
+                        db,
+                        websocket,
+                        run.id,
+                        "run_failed",
+                        "Agent runtime failed",
+                        details={"exit_code": returncode},
+                    )
+                    run.status = "failed"
+                    db.commit()
+                    return run.id
+
+                await save_and_send_event(db, websocket, run.id, "runtime_completed", "runtime_completed")
+                run.status = "complete"
+                db.commit()
+                return run.id
+            except Exception as exc:
+                await save_and_send_event(db, websocket, run.id, "run_failed", f"Agent runtime failed: {exc}")
+                run.status = "failed"
+                db.commit()
+                return run.id
+
 
         async for agent_event in run_agent(task):
             details = dict(agent_event.get("details", {}))

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import PageFrame from "./PageFrame";
 import {
@@ -22,7 +22,22 @@ export default function AgentControlDashboard() {
     hasBackendEvents,
     isRunning,
     runAgentControl,
+    runAgentControlWithUrl,
   } = useBackendRunStream();
+
+  const [githubUrl, setGithubUrl] = useState(
+    "https://github.com/gaurijain21/test_gpugodfather"
+  );
+  const [urlValid, setUrlValid] = useState(true);
+
+  const handleStartTestRun = () => {
+    if (!githubUrl || !githubUrl.startsWith("https://github.com/")) {
+      setUrlValid(false);
+      return;
+    }
+    setUrlValid(true);
+    runAgentControlWithUrl ? runAgentControlWithUrl(githubUrl) : runAgentControl();
+  };
 
   useEffect(() => {
     runNormalizationTests();
@@ -68,6 +83,33 @@ export default function AgentControlDashboard() {
             <p>Backend stream: {config.wsUrl}</p>
             <p>Run endpoint: {config.runUrl}</p>
           </div>
+        </div>
+        <div className="mb-4">
+          <label className="block text-xs font-medium text-slate-500">GitHub Repository URL</label>
+          <div className="mt-2 flex gap-3">
+            <input
+              value={githubUrl}
+              onChange={(e) => setGithubUrl(e.target.value)}
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+            />
+
+            <button
+              onClick={handleStartTestRun}
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 transition hover:bg-slate-50"
+            >
+              Start Test Run
+            </button>
+          </div>
+
+          <p className="mt-2 text-xs text-slate-500">Try the included demo repository or paste your own GitHub repo.</p>
+
+          {!urlValid && (
+            <p className="mt-2 text-xs text-amber-700">Please enter a valid GitHub URL starting with https://github.com/</p>
+          )}
+
+          {connectionStatus !== "connected" && (
+            <p className="mt-2 text-xs text-slate-500">Backend not connected yet — showing demo run</p>
+          )}
         </div>
 
         <div className="grid grid-cols-5 gap-6 text-sm">

@@ -173,6 +173,40 @@ export function useBackendRunStream(initialEvents: AgentEvent[] = []) {
     }
   }, [addDashboardEvent]);
 
+  const runAgentControlWithUrl = useCallback((githubUrl?: string) => {
+    setIsRunning(true);
+
+    const payload = githubUrl
+      ? { task: "Run test analysis on repository", githubUrl }
+      : { task: "test task" };
+
+    try {
+      const existingSocket = socketRef.current;
+
+      if (existingSocket?.readyState === WebSocket.OPEN) {
+        existingSocket.send(JSON.stringify(payload));
+      } else {
+        socketRef.current = startAgentRun(payload as any, {
+          onOpen: () => setConnectionStatus("connected"),
+          onEvent: addDashboardEvent,
+          onMalformedMessage: (raw) => console.warn("Ignoring malformed backend event.", raw),
+          onError: (error) => {
+            console.warn("Backend run WebSocket failed.", error);
+            setConnectionStatus("offline");
+            setIsRunning(false);
+          },
+          onClose: () => {
+            socketRef.current = null;
+            setIsRunning(false);
+          },
+        });
+      }
+    } catch (error) {
+      console.warn("Failed to start backend run.", error);
+      setIsRunning(false);
+    }
+  }, [addDashboardEvent]);
+
   return {
     addDashboardEvent,
     chartData,
@@ -182,5 +216,6 @@ export function useBackendRunStream(initialEvents: AgentEvent[] = []) {
     hasBackendEvents,
     isRunning,
     runAgentControl,
+    runAgentControlWithUrl,
   };
 }
