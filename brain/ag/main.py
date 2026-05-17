@@ -124,10 +124,10 @@ def run_control_plane(task: str) -> dict[str, Any]:
         f"\n[CONTROL PLANE] verification result:\n{verification}"
     )
 
-# final metrics
-router.show_metrics()
+    # final metrics
+    router.show_metrics()
 
-print("complete")
+    print("complete")
 
     return {
         "task": task,

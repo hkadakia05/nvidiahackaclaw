@@ -48,7 +48,12 @@ export function useBackendRunStream(initialEvents: AgentEvent[] = []) {
 
     if (!normalized) return;
 
-    if (normalized.type === "run_complete" || normalized.type === "run_failed") {
+    if (
+      normalized.type === "run_complete" ||
+      normalized.type === "run_failed" ||
+      normalized.type === "runtime_completed" ||
+      normalized.type === "runtime_failed"
+    ) {
       setIsRunning(false);
     }
 
@@ -186,7 +191,7 @@ export function useBackendRunStream(initialEvents: AgentEvent[] = []) {
       if (existingSocket?.readyState === WebSocket.OPEN) {
         existingSocket.send(JSON.stringify(payload));
       } else {
-        socketRef.current = startAgentRun(payload as any, {
+        socketRef.current = startAgentRun(payload, {
           onOpen: () => setConnectionStatus("connected"),
           onEvent: addDashboardEvent,
           onMalformedMessage: (raw) => console.warn("Ignoring malformed backend event.", raw),

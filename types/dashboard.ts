@@ -63,6 +63,7 @@ export type HealthResponse = {
 
 export type StartRunPayload = {
   task: string;
+  githubUrl?: string;
 };
 
 export type AgentStatus = {

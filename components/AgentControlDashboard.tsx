@@ -36,7 +36,11 @@ export default function AgentControlDashboard() {
       return;
     }
     setUrlValid(true);
-    runAgentControlWithUrl ? runAgentControlWithUrl(githubUrl) : runAgentControl();
+    if (runAgentControlWithUrl) {
+      runAgentControlWithUrl(githubUrl);
+    } else {
+      runAgentControl();
+    }
   };
 
   useEffect(() => {

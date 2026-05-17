@@ -3,7 +3,7 @@ import json
 import uuid
 from datetime import datetime
 
-from fastapi import WebSocket
+from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from app import models
@@ -11,8 +11,6 @@ from app.agent_adapter import run_agent
 from app import repo_analysis
 import os
 import sys
-import threading
-import queue
 from app.redis_client import get_cached_decision, set_cached_decision
 from app.security import SecurityAction, SecurityService
 
@@ -41,6 +39,15 @@ EVENT_METADATA = {
     "security_warning": {"source": "security", "level": "warning"},
     "audit_written": {"source": "security", "level": "success"},
     "final_answer": {"source": "ai", "level": "success"},
+    "runtime_launch_started": {"source": "runtime", "level": "info"},
+    "runtime_process_started": {"source": "runtime", "level": "info"},
+    "repo_clone_started": {"source": "runtime", "level": "info"},
+    "repo_clone_completed": {"source": "runtime", "level": "success"},
+    "dependency_scan_started": {"source": "runtime", "level": "info"},
+    "security_scan_started": {"source": "runtime", "level": "info"},
+    "runtime_output": {"source": "runtime", "level": "info"},
+    "runtime_completed": {"source": "runtime", "level": "success"},
+    "runtime_failed": {"source": "runtime", "level": "error"},
     "run_complete": {"source": "backend", "level": "success"},
     "run_failed": {"source": "backend", "level": "error"},
 }
@@ -49,6 +56,32 @@ EVENT_METADATA = {
 def get_event_metadata(event_type: str) -> dict:
     """Return frontend-friendly display metadata for an event type."""
     return EVENT_METADATA.get(event_type, {"source": "backend", "level": "info"})
+
+
+def runtime_event_type_for_line(line: str, emitted_event_types: set[str]) -> str:
+    """Map runtime stdout to dashboard milestone events when the line is clear."""
+    normalized = line.lower()
+
+    if "clone" in normalized and "start" in normalized and "repo_clone_started" not in emitted_event_types:
+        return "repo_clone_started"
+    if (
+        "clone" in normalized
+        and any(word in normalized for word in ("complete", "completed", "done", "success"))
+        and "repo_clone_completed" not in emitted_event_types
+    ):
+        return "repo_clone_completed"
+    if (
+        any(word in normalized for word in ("dependency", "dependencies", "package"))
+        and "dependency_scan_started" not in emitted_event_types
+    ):
+        return "dependency_scan_started"
+    if (
+        any(word in normalized for word in ("security", "vulnerability", "policy"))
+        and "security_scan_started" not in emitted_event_types
+    ):
+        return "security_scan_started"
+
+    return "runtime_output"
 
 
 def create_run(db: Session, task: str) -> models.Run:
@@ -138,7 +171,7 @@ async def run_fake_agent_timeline(db: Session, websocket: WebSocket, task: str, 
     run = create_run(db, task)
     security_service = SecurityService()
 
-    cached_decision = get_cached_decision(task)
+    cached_decision = None if github_url else get_cached_decision(task)
     if cached_decision:
         await save_and_send_event(db, websocket, run.id, "run_started", "Run started")
         await asyncio.sleep(0.2)
@@ -162,18 +195,46 @@ async def run_fake_agent_timeline(db: Session, websocket: WebSocket, task: str, 
         # stdout back to the frontend. Fall back to existing flows when no URL.
         if github_url:
             runtime_path = r"C:\Gauri\test_gpugodfather\gpu-agent-runtime\main.py"
+            runtime_cwd = os.path.dirname(runtime_path)
+            print(f"received githubUrl: {github_url}")
+            print(f"runtime path: {runtime_path}")
+
             if not os.path.exists(runtime_path):
-                await save_and_send_event(db, websocket, run.id, "run_failed", "Agent runtime not found")
+                await save_and_send_event(
+                    db,
+                    websocket,
+                    run.id,
+                    "runtime_failed",
+                    "Agent runtime not found",
+                    details={"runtime_path": runtime_path},
+                )
                 run.status = "failed"
                 db.commit()
                 return run.id
 
+            proc: asyncio.subprocess.Process | None = None
             try:
-                await save_and_send_event(db, websocket, run.id, "runtime_started", f"Starting agent runtime for {github_url}")
+                await save_and_send_event(
+                    db,
+                    websocket,
+                    run.id,
+                    "runtime_launch_started",
+                    f"Launching local runtime for {github_url}",
+                    details={"githubUrl": github_url, "runtime_path": runtime_path},
+                )
+                await save_and_send_event(
+                    db,
+                    websocket,
+                    run.id,
+                    "repo_clone_started",
+                    "Repository analysis requested",
+                    details={"githubUrl": github_url},
+                )
 
                 env = os.environ.copy()
                 env["TARGET_GITHUB_URL"] = github_url
                 env["ENABLE_WEBSOCKET"] = "false"
+                env["PYTHONUNBUFFERED"] = "1"
 
                 proc = await asyncio.create_subprocess_exec(
                     sys.executable,
@@ -181,24 +242,41 @@ async def run_fake_agent_timeline(db: Session, websocket: WebSocket, task: str, 
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
                     env=env,
+                    cwd=runtime_cwd,
+                )
+                print(f"subprocess PID: {proc.pid}")
+
+                await save_and_send_event(
+                    db,
+                    websocket,
+                    run.id,
+                    "runtime_process_started",
+                    f"Runtime process started with PID {proc.pid}",
+                    details={"pid": proc.pid},
                 )
 
                 # Read stdout lines and stream them as events
                 assert proc.stdout is not None
+                emitted_event_types = {"repo_clone_started"}
                 while True:
                     line = await proc.stdout.readline()
                     if not line:
                         break
                     text = line.decode(errors="replace").rstrip()
-                    await save_and_send_event(db, websocket, run.id, "runtime_output", text)
+                    if not text:
+                        continue
+                    event_type = runtime_event_type_for_line(text, emitted_event_types)
+                    emitted_event_types.add(event_type)
+                    await save_and_send_event(db, websocket, run.id, event_type, text)
 
                 returncode = await proc.wait()
+                print(f"process exit code: {returncode}")
                 if returncode != 0:
                     await save_and_send_event(
                         db,
                         websocket,
                         run.id,
-                        "run_failed",
+                        "runtime_failed",
                         "Agent runtime failed",
                         details={"exit_code": returncode},
                     )
@@ -206,12 +284,52 @@ async def run_fake_agent_timeline(db: Session, websocket: WebSocket, task: str, 
                     db.commit()
                     return run.id
 
-                await save_and_send_event(db, websocket, run.id, "runtime_completed", "runtime_completed")
+                if "repo_clone_completed" not in emitted_event_types:
+                    await save_and_send_event(
+                        db,
+                        websocket,
+                        run.id,
+                        "repo_clone_completed",
+                        "Repository analysis runtime finished clone/setup phase",
+                        details={"githubUrl": github_url},
+                    )
+                if "dependency_scan_started" not in emitted_event_types:
+                    await save_and_send_event(
+                        db,
+                        websocket,
+                        run.id,
+                        "dependency_scan_started",
+                        "Dependency scan phase reached",
+                    )
+                if "security_scan_started" not in emitted_event_types:
+                    await save_and_send_event(
+                        db,
+                        websocket,
+                        run.id,
+                        "security_scan_started",
+                        "Security scan phase reached",
+                    )
+
+                await save_and_send_event(db, websocket, run.id, "runtime_completed", "Runtime completed")
+                await save_and_send_event(db, websocket, run.id, "run_complete", "Run completed")
                 run.status = "complete"
                 db.commit()
                 return run.id
+            except WebSocketDisconnect:
+                if proc and proc.returncode is None:
+                    proc.terminate()
+                    try:
+                        await asyncio.wait_for(proc.wait(), timeout=5)
+                    except asyncio.TimeoutError:
+                        proc.kill()
+                        await proc.wait()
+                print("websocket disconnected during runtime run")
+                run.status = "failed"
+                db.commit()
+                return run.id
             except Exception as exc:
-                await save_and_send_event(db, websocket, run.id, "run_failed", f"Agent runtime failed: {exc}")
+                print(f"subprocess failure: {exc}")
+                await save_and_send_event(db, websocket, run.id, "runtime_failed", f"Agent runtime failed: {exc}")
                 run.status = "failed"
                 db.commit()
                 return run.id

@@ -68,6 +68,8 @@ export function normalizeBackendLevel(event: BackendEvent): EventLevel {
 
   if (
     event.type === "run_complete" ||
+    event.type === "runtime_completed" ||
+    event.type === "repo_clone_completed" ||
     event.type === "sandbox_completed" ||
     event.type === "audit_written"
   ) {
@@ -82,7 +84,12 @@ export function normalizeBackendLevel(event: BackendEvent): EventLevel {
     return "approved";
   }
 
-  if (event.type === "run_failed" || event.type === "error" || event.level === "error") {
+  if (
+    event.type === "run_failed" ||
+    event.type === "runtime_failed" ||
+    event.type === "error" ||
+    event.level === "error"
+  ) {
     return "denied";
   }
 
