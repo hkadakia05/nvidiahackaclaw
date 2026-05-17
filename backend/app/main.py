@@ -61,12 +61,13 @@ async def websocket_run(websocket: WebSocket) -> None:
     try:
         data = await websocket.receive_json()
         task = data.get("task")
+        github_url = data.get("githubUrl") or data.get("github_url")
 
         if not task:
             await websocket.send_json({"error": "Please send JSON with a task field."})
             return
 
-        await run_fake_agent_timeline(db, websocket, task)
+        await run_fake_agent_timeline(db, websocket, task, github_url)
     except WebSocketDisconnect:
         # The browser/client closed the connection. In a bigger app, this is
         # where you could mark the run as cancelled.

@@ -153,3 +153,28 @@ backend/
 ## Notes
 
 This project intentionally does not include authentication, real AI model calls, or NVIDIA Brev.
+
+## Real repository analysis (optional)
+
+The backend can optionally clone and inspect public GitHub repositories to produce live analysis events.
+
+Enable by setting environment variables (see `.env.example`):
+
+```
+REAL_REPO_ANALYSIS=true
+CLONE_WORKSPACE_DIR=./tmp/repos
+MAX_REPO_SIZE_MB=100
+KEEP_CLONED_REPOS=false
+```
+
+How it works
+- When the WebSocket run payload includes `githubUrl` and `REAL_REPO_ANALYSIS=true`, the backend will perform a shallow git clone and scan files.
+- The inspector is read-only: it does not execute repository code. It parses `package.json`, `requirements.txt`, `pyproject.toml`, looks for `Dockerfile`, `.env`, `.gitignore`, and searches source files for risky patterns such as `eval`, `exec`, `os.system`, `subprocess`, or hard-coded secrets.
+- The analysis emits events that stream to the dashboard, including `repo_clone_started`, `repo_clone_completed`, `repo_structure_detected`, `dependency_scan_started`, `dependency_scan_completed`, `security_scan_started`, `security_finding`, `agent_recommendation`, and `run_complete`.
+
+Safety limitations
+- The inspector performs only static, read-only analysis and never runs repository code or scripts. It uses `git clone --depth 1` for speed and safety.
+- If you need to run code, implement a proper sandboxed execution environment (not included). Be cautious with private repositories and secrets.
+
+Testing
+- To test with the included demo repository, provide the GitHub URL in the frontend input and start a run. The repo analysis will clone and stream findings to the dashboard.
